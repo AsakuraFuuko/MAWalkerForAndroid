@@ -9,10 +9,8 @@ import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.SecretKeySpec;
 
-import com.example.maw.MainActivity;
-
 import android.util.Base64;
-import walker.Config;
+import walker.Info;
 
 public class Crypto {
 	private static final String BaseSecretKey = "uH9JF2cHf6OppaC1";
@@ -22,7 +20,7 @@ public class Crypto {
 	private static String GetSecretKey(boolean useLoginId) {
 		String pw = BaseSecretKey;
 		if (useLoginId)
-			pw += MainActivity.config.getString("LoginID", "");
+			pw += Info.LoginId;
 		while (pw.length() < 32)
 			pw += "0";
 		return pw;
@@ -35,8 +33,7 @@ public class Crypto {
 				.getBytes(), "AES");
 		Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
 		c.init(Cipher.ENCRYPT_MODE, keyspec);
-		return Base64.encodeToString(c.doFinal(toEncrypt.getBytes()),
-				Base64.DEFAULT);
+		return Base64.encodeToString(c.doFinal(toEncrypt.getBytes()), 0);
 	}
 
 	public static String Encrypt2Base64NoKey(String toEncrypt)
@@ -60,7 +57,7 @@ public class Crypto {
 				.getBytes(), "AES");
 		Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
 		c.init(Cipher.DECRYPT_MODE, keyspec);
-		return new String(c.doFinal(Base64.decode(cyphertext, Base64.DEFAULT)));
+		return new String(c.doFinal(Base64.decode(cyphertext, 0)));
 	}
 
 	public static String DecryptBase64WithKey2Str(String cyphertext)
@@ -70,7 +67,7 @@ public class Crypto {
 				GetSecretKey(true).getBytes(), "AES");
 		Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
 		c.init(Cipher.DECRYPT_MODE, keyspec);
-		return new String(c.doFinal(Base64.decode(cyphertext, Base64.DEFAULT)));
+		return new String(c.doFinal(Base64.decode(cyphertext, 0)));
 	}
 
 	private static byte[] decrypt2Bytes(byte[] ciphertext, boolean useLoginId)

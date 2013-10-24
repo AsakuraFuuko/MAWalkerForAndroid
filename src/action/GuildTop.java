@@ -1,7 +1,5 @@
 package action;
 
-import info.FairyBattleInfo;
-
 import java.util.ArrayList;
 
 import javax.xml.xpath.XPath;
@@ -11,9 +9,6 @@ import javax.xml.xpath.XPathFactory;
 import org.apache.http.NameValuePair;
 import org.w3c.dom.Document;
 
-import com.example.maw.MainActivity;
-
-import walker.Config;
 import walker.ErrorData;
 import walker.Info;
 import walker.Process;
@@ -25,7 +20,7 @@ public class GuildTop {
 
 	private static byte[] response;
 
-	public static boolean run() throws Exception {
+	public static int run() throws Exception {
 		ArrayList<NameValuePair> post = new ArrayList<NameValuePair>();
 		try {
 			response = Process.network.ConnectToServer(URL_GUILD_TOP, post,
@@ -37,6 +32,18 @@ public class GuildTop {
 			ErrorData.currentErrorType = ErrorData.ErrorType.ConnectionError;
 			ErrorData.text = ex.getMessage();
 			throw ex;
+		}
+
+		// Thread.sleep(Process.getRandom(1000, 2000));
+
+		if (Info.Debug) {
+			String clazzName = new Object() {
+				public String getClassName() {
+					String clazzName = this.getClass().getName();
+					return clazzName.substring(0, clazzName.lastIndexOf('$'));
+				}
+			}.getClassName();
+			walker.Go.saveXMLFile(response, clazzName);
 		}
 
 		Document doc;
@@ -54,25 +61,33 @@ public class GuildTop {
 
 		try {
 			if (!xpath.evaluate("/response/header/error/code", doc).equals("0")) {
-				ErrorData.currentErrorType = ErrorData.ErrorType.GuildTopResponse;
+				if (xpath.evaluate("/response/header/error/code", doc).equals(
+						"9000")) {
+					Process.AddUrgentTask(Info.EventType.cookieOutOfDate);
+					ErrorData.currentErrorType = ErrorData.ErrorType.CookieOutOfDate;
+				} else {
+					ErrorData.currentErrorType = ErrorData.ErrorType.GuildTopResponse;
+				}
 				ErrorData.currentDataType = ErrorData.DataType.text;
 				ErrorData.text = xpath.evaluate(
 						"/response/header/error/message", doc);
-				return false;
+				return 0;
+			}
+
+			if (!(Boolean) xpath.evaluate("count(/response/body/guild_top)>0",
+					doc, XPathConstants.BOOLEAN)) {
+				if ((Boolean) xpath.evaluate("count(//guild_top_no_fairy)>0",
+						doc, XPathConstants.BOOLEAN)) {
+					Process.info.NoFairy = true;// 深夜没有外敌战
+					return 0;
+				} else {
+					Process.info.NoFairy = false;
+					return 3;// 需要重新获取
+				}
 			}
 
 			if (GuildDefeat.judge(doc)) {
-				Process.info.events.push(Info.EventType.guildTopRetry);
-				return false;
-			}
-
-			if (Boolean.valueOf(xpath.evaluate("count(//guild_top_no_fairy)>0",
-					doc, XPathConstants.BOOLEAN).toString())) {
-				// 深夜没有外敌战
-				Process.info.NoFairy = true;
-				return false;
-			} else {
-				Process.info.NoFairy = false;
+				return 3;// 需要重新获取
 			}
 
 			Process.info.gfairy.FairyName = xpath.evaluate("//fairy/name", doc);
@@ -80,64 +95,54 @@ public class GuildTop {
 					doc);
 			Process.info.gfairy.GuildId = xpath.evaluate(
 					"//fairy/discoverer_id", doc);
-			Process.info.gfairy.FairyLevel = xpath.evaluate("//fairy/lv", doc); // chain_counter
-			Process.info.gfairy.ChainCounter = xpath.evaluate(
-					"//guild_top_update/chain_counter", doc);
-			String s = xpath.evaluate("//guild_top_update/guild_fairy_weak/id",
-					doc);
-			Process.info.gfairy.weak = FairyBattleInfo.GetWeak(s);
+			Process.info.gfairy.FairyLevel = Integer.parseInt(xpath.evaluate(
+					"//fairy/lv", doc));
+			Process.info.gfbforce.chain_counter = Integer.parseInt(xpath
+					.evaluate("//chain_counter", doc));
+			Process.info.gfbforce.attack_compensation = Double
+					.parseDouble(xpath.evaluate("//attack_compensation", doc));
 
-			Process.info.gfairy.GuildTotalHP = Long.parseLong(xpath.evaluate(
-					"//fairy/hp_max", doc));
-
-			if (Process.info.ticket <= 0) {
-				return false;
-			}
-			if (Boolean.valueOf(xpath.evaluate("count(//force_gauge)>0", doc,
-					XPathConstants.BOOLEAN).toString())) {
-				Process.info.gfairy.OwnGuildHP = Long.parseLong(xpath.evaluate(
-						"//force_gauge/own", doc));
-				Process.info.gfairy.RivalGuildHP = Long.parseLong(xpath
-						.evaluate("//force_gauge/rival", doc));
-				Process.info.gfairy.GuildTotalHP = Long.parseLong(xpath
-						.evaluate("//force_gauge/total", doc));
-				double ora = (double) Process.info.gfairy.OwnGuildHP
-						/ (double) Process.info.gfairy.GuildTotalHP;
-				double rra = (double) Process.info.gfairy.RivalGuildHP
-						/ (double) Process.info.gfairy.GuildTotalHP;
-				if (Process.info.ticket <= Integer.parseInt(MainActivity.config
-						.getString("keep_guild_battle_tickets", "8"))) {
-					if (ora > Float.parseFloat(MainActivity.config.getString(
-							"guild_battle_percent", "0.51"))) {
-						ErrorData.currentDataType = ErrorData.DataType.text;
-						ErrorData.currentErrorType = ErrorData.ErrorType.none;
-						ErrorData.text = String.format(
-								"我方攻击的HP已超过设定%.2f比例，不继续攻击...", Float
-										.parseFloat(MainActivity.config
-												.getString(
-														"guild_battle_percent",
-														"0.51")));
-						return false;
-					} else if (rra > Float.parseFloat(MainActivity.config
-							.getString("guild_battle_percent", "0.51"))) {
-						ErrorData.currentDataType = ErrorData.DataType.text;
-						ErrorData.currentErrorType = ErrorData.ErrorType.none;
-						ErrorData.text = String.format(
-								"对方攻击的HP已超过设定%.2f比例，不继续攻击...", Float
-										.parseFloat(MainActivity.config
-												.getString(
-														"guild_battle_percent",
-														"0.51")));
-						return false;
-					}
+			if (Info.OnlyBcBuff && Process.info.ticket < Info.ticket_max) {
+				if (Boolean.valueOf(xpath.evaluate("count(//spp_skill_effect)>0",
+						doc, XPathConstants.BOOLEAN).toString())) {
+					String tmp = xpath.evaluate("//spp_skill_effect", doc);
+					walker.Go.log(String.format("Guild Fairy Buff: %s.", tmp),
+							!Info.Nolog);
+					if (tmp.indexOf("BC") == -1)
+						return 0;
 				} else {
-					Process.info.events.push(Info.EventType.guildBattle);
-					return true;
+					walker.Go.log("Guild Fairy Buff: None.", !Info.Nolog);
+					return 0;
 				}
 			}
 
-			Process.info.events.push(Info.EventType.guildBattle);
-			return true;
+			if (Boolean.valueOf(xpath.evaluate("count(//force_gauge)>0", doc,
+					XPathConstants.BOOLEAN).toString())) {
+				Process.info.gfbforce.total = Long.parseLong(xpath.evaluate(
+						"//force_gauge/total", doc));
+				Process.info.gfbforce.own = Long.parseLong(xpath.evaluate(
+						"//force_gauge/own", doc));
+				Process.info.gfbforce.rival = Long.parseLong(xpath.evaluate(
+						"//force_gauge/rival", doc));
+				Process.info.gfbforce.ownscale = Process.info.gfbforce.own
+						* 100 / Process.info.gfbforce.total;
+				Process.info.gfbforce.rivalscale = Process.info.gfbforce.rival
+						* 100 / Process.info.gfbforce.total;
+
+				if (Process.info.ticket == 0)
+					return 1;// 没票不打
+
+				if (Process.info.ticket >= Info.ticket_max)
+					return 2;// 挑战书太多要打
+
+				if (Process.info.gfbforce.ownscale > 100 * Info.battle_win_scale
+						|| Process.info.gfbforce.rivalscale > 100 * Info.battle_win_scale)
+					return 1;// 已经分出胜负不打
+
+				return 2;// 其他情况都要打
+			} else {
+				return 0;
+			}
 		} catch (Exception ex) {
 			if (ErrorData.currentErrorType != ErrorData.ErrorType.none)
 				throw ex;

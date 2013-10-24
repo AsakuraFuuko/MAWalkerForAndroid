@@ -1,9 +1,11 @@
 package action;
 
 import info.FairyBattleInfo;
+import info.FairyDianzanInfo;
 import info.FairySelectUser;
 
 import java.util.ArrayList;
+import java.util.LinkedList;
 
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
@@ -14,9 +16,6 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-import com.example.maw.MainActivity;
-
-import walker.Config;
 import walker.ErrorData;
 import walker.Info;
 import walker.Process;
@@ -38,6 +37,18 @@ public class GetFairyList {
 			ErrorData.currentErrorType = ErrorData.ErrorType.ConnectionError;
 			ErrorData.text = ex.getMessage();
 			throw ex;
+		}
+
+		// Thread.sleep(Process.getRandom(1000, 2000));
+
+		if (Info.Debug) {
+			String clazzName = new Object() {
+				public String getClassName() {
+					String clazzName = this.getClass().getName();
+					return clazzName.substring(0, clazzName.lastIndexOf('$'));
+				}
+			}.getClassName();
+			walker.Go.saveXMLFile(response, clazzName);
 		}
 
 		Document doc;
@@ -65,25 +76,69 @@ public class GetFairyList {
 
 		try {
 			if (!xpath.evaluate("/response/header/error/code", doc).equals("0")) {
-				ErrorData.currentErrorType = ErrorData.ErrorType.FairyListResponse;
+				if (xpath.evaluate("/response/header/error/code", doc).equals(
+						"9000")) {
+					Process.AddUrgentTask(Info.EventType.cookieOutOfDate);
+					ErrorData.currentErrorType = ErrorData.ErrorType.CookieOutOfDate;
+				} else {
+					ErrorData.currentErrorType = ErrorData.ErrorType.FairyListResponse;
+				}
 				ErrorData.currentDataType = ErrorData.DataType.text;
 				ErrorData.text = xpath.evaluate(
 						"/response/header/error/message", doc);
 				return false;
 			}
 
-			if (!xpath.evaluate("//remaining_rewards", doc).equals("0")) {
-				if (MainActivity.config.getBoolean("receive_battle_present",
-						true)) {
-					Process.info.events.push(Info.EventType.fairyReward);
+			// 寻找可以点赞的妖
+			NodeList fairy_dianzan = (NodeList) xpath.evaluate(
+					"//fairy_select/fairy_event[put_down=5]/fairy", doc,
+					XPathConstants.NODESET);
+
+			if (fairy_dianzan.getLength() > 0) {
+				String dianzan_result = String.format(
+						"Find %d fairy(s) that we can send dianzan.",
+						fairy_dianzan.getLength());
+				walker.Go.log(dianzan_result, !Info.Nolog);
+			}
+
+			for (int i = 0; i < fairy_dianzan.getLength(); i++) {
+				Node f = fairy_dianzan.item(i).getFirstChild();
+				FairyDianzanInfo fbi_dianzan = new FairyDianzanInfo();
+				boolean dianzan_flag = false;
+				do {
+					if (f.getNodeName().equals("serial_id")) {
+						fbi_dianzan.SerialId = f.getFirstChild().getNodeValue();
+					} else if (f.getNodeName().equals("discoverer_id")) {
+						fbi_dianzan.UserId = f.getFirstChild().getNodeValue();
+					}
+					f = f.getNextSibling();
+				} while (f != null);
+				FairyDianzanInfo fdz = new FairyDianzanInfo(
+						fbi_dianzan.SerialId, fbi_dianzan.UserId);
+				for (FairyDianzanInfo fdzi : Process.info.FairyDianzanList) {
+					if (fdz.equals(fdzi)) {
+						dianzan_flag = true;
+						break;
+					}
 				}
+				if (!dianzan_flag)
+					Process.info.FairyDianzanList.push(fdz);
+			}
+
+			if (!Process.info.FairyDianzanList.empty()) {
+				Process.AddTask(Info.EventType.fairyDianzan);
+			}
+
+			// 获取奖励
+			if (!xpath.evaluate("//remaining_rewards", doc).equals("0")) {
+				Process.AddTask(Info.EventType.fairyReward);
 			}
 
 			// 获取放妖的用户
-			NodeList fairyuser = (NodeList) xpath.evaluate(
+			NodeList fairy_finder = (NodeList) xpath.evaluate(
 					"//fairy_select/user", doc, XPathConstants.NODESET);
-			for (int i = 0; i < fairyuser.getLength(); i++) {
-				Node f = fairyuser.item(i).getFirstChild();
+			for (int i = 0; i < fairy_finder.getLength(); i++) {
+				Node f = fairy_finder.item(i).getFirstChild();
 				FairySelectUser fsu = new FairySelectUser();
 				do {
 					if (f.getNodeName().equals("id")) {
@@ -98,33 +153,8 @@ public class GetFairyList {
 				}
 			}
 
-			NodeList fairy1 = (NodeList) xpath.evaluate(
-					"//fairy_select/fairy_event[put_down=5]/fairy", doc,
-					XPathConstants.NODESET);
-
-			int aa = fairy1.getLength();
-
-			MainActivity.log("找到" + aa + "个可赞的PFB...");
-			for (int i = 0; i < fairy1.getLength(); i++) {
-				Node f = fairy1.item(i).getFirstChild();
-				String serial_Id = "";
-				String user_Id = "";
-				do {
-					if (f.getNodeName().equals("serial_id")) {
-						serial_Id = f.getFirstChild().getNodeValue();
-					} else if (f.getNodeName().equals("discoverer_id")) {
-						user_Id = f.getFirstChild().getNodeValue();
-					}
-					f = f.getNextSibling();
-				} while (f != null);
-				Process.info.PFBGoodList.push(new info.PFBGood(serial_Id,
-						user_Id));
-			}
-			if (!Process.info.PFBGoodList.isEmpty()) {
-				Process.info.events.push(Info.EventType.PFBGood);
-			}
-
 			// TODO: 这两周先是只寻找0BC的，之后再扩展
+			Process.info.myFairyStillAlive = false;
 			// NodeList fairy =
 			// (NodeList)xpath.evaluate("//fairy_select/fairy_event[put_down=4]/fairy",
 			// doc, XPathConstants.NODESET);
@@ -132,63 +162,83 @@ public class GetFairyList {
 					"//fairy_select/fairy_event[put_down=1]/fairy", doc,
 					XPathConstants.NODESET);
 
-			Process.info.OwnFairyBattleKilled = true;
-			ArrayList<FairyBattleInfo> fbis = new ArrayList<FairyBattleInfo>();
+			Process.info.PrivateFairyList = new LinkedList<FairyBattleInfo>();
 			for (int i = 0; i < fairy.getLength(); i++) {
 				Node f = fairy.item(i).getFirstChild();
 				FairyBattleInfo fbi = new FairyBattleInfo();
+				fbi.ForceKill = false;
 				boolean attack_flag = false;
 				do {
 					if (f.getNodeName().equals("serial_id")) {
 						fbi.SerialId = f.getFirstChild().getNodeValue();
 					} else if (f.getNodeName().equals("discoverer_id")) {
 						fbi.UserId = f.getFirstChild().getNodeValue();
+						fbi.Type = FairyBattleInfo.PRIVATE;
+						if (Process.info.userId.equals(fbi.UserId)) {
+							fbi.Type |= FairyBattleInfo.SELF;
+							Process.info.myFairyStillAlive = true;
+						}
 					} else if (f.getNodeName().equals("lv")) {
-						fbi.FairyLevel = f.getFirstChild().getNodeValue();
+						fbi.FairyLevel = Integer.parseInt(f.getFirstChild()
+								.getNodeValue());
 					} else if (f.getNodeName().equals("name")) {
 						fbi.FairyName = f.getFirstChild().getNodeValue();
 					} else if (f.getNodeName().equals("rare_flg")) {
 						if (f.getFirstChild().getNodeValue().equals("1")) {
-							fbi.Type = FairyBattleInfo.PRIVATE
-									| FairyBattleInfo.RARE;
-						} else {
-							fbi.Type = FairyBattleInfo.PRIVATE;
+							fbi.Type |= FairyBattleInfo.RARE;
 						}
+					} else if (f.getNodeName().equals("hp")) {
+						fbi.FairyHp = Integer.parseInt(f.getFirstChild()
+								.getNodeValue());
+					} else if (f.getNodeName().equals("hp_max")) {
+						fbi.FairyHpMax = Integer.parseInt(f.getFirstChild()
+								.getNodeValue());
 					}
 					f = f.getNextSibling();
 				} while (f != null);
-				if (MainActivity.config.getBoolean("allow_attack_same_fairy",
-						false)) {
-					fbis.add(fbi);
-				} else {
-					for (FairyBattleInfo bi : Process.info.LatestFairyList) {
-						if (bi.equals(fbi)) {
-							// 已经舔过
-							attack_flag = true;
-							break;
-						}
+				long killFairyHpMax = 0;
+				boolean useKillFairyDeck = false;
+				switch (fbi.Type) {
+				case 4:
+					killFairyHpMax = Info.FriendFairyBattleNormal.KillFairyHpMax;
+					useKillFairyDeck = Info.FriendFairyBattleNormal.UseKillFairyDeck;
+					break;
+				case 5:
+					killFairyHpMax = Info.FriendFairyBattleRare.KillFairyHpMax;
+					useKillFairyDeck = Info.FriendFairyBattleRare.UseKillFairyDeck;
+					break;
+				case 6:
+					killFairyHpMax = Info.PrivateFairyBattleNormal.KillFairyHpMax;
+					useKillFairyDeck = Info.PrivateFairyBattleNormal.UseKillFairyDeck;
+					break;
+				case 7:
+					killFairyHpMax = Info.PrivateFairyBattleRare.KillFairyHpMax;
+					useKillFairyDeck = Info.PrivateFairyBattleRare.UseKillFairyDeck;
+					break;
+				default:
+					break;
+				}
+				for (FairyBattleInfo bi : Process.info.LatestFairyList) {
+					if (bi.equals(fbi)) {
+						// 已经舔过
+						attack_flag = true;
+						if (fbi.FairyHp < killFairyHpMax && useKillFairyDeck)
+							fbi.ForceKill = true;
 					}
-					if (!attack_flag)
-						fbis.add(fbi);
 				}
-
-				if (Process.info.userId.equals(fbi.UserId)) {
-					Process.info.OwnFairyBattleKilled = false;
+				if (!attack_flag || fbi.ForceKill)
+					Process.info.PrivateFairyList.offer(fbi);
+				else if (Info.specUser
+						.contains(Process.info.FairySelectUserList
+								.get(fbi.UserId).userName)) {
+					fbi.ForceKill = true;
+					Process.info.PrivateFairyList.offer(fbi);
 				}
 			}
 
-			if (fbis.size() > 1)
-				Process.info.events.push(Info.EventType.fairyAppear); // 以便再次寻找
-			if (fbis.size() > 0) {
-				Process.info.fairy = new FairyBattleInfo(fbis.get(0));
-				Process.info.events.push(Info.EventType.gotoFloor);
-				Process.info.events.push(Info.EventType.recvPFBGood);
-				if (!Process.info.fairy.UserId.equals(Process.info.userId)
-						|| Process.info.OwnFairyBattleKilled)
-					Process.info.events.push(Info.EventType.fairyCanBattle);
+			if (!Process.info.PrivateFairyList.isEmpty()) {
+				Process.AddUrgentTask(Info.EventType.fairyCanBattle);
 			}
-
-			Process.info.SetTimeoutByAction(Name);
 
 		} catch (Exception ex) {
 			if (ErrorData.currentErrorType != ErrorData.ErrorType.none)
@@ -200,6 +250,5 @@ public class GetFairyList {
 		}
 
 		return true;
-
 	}
 }

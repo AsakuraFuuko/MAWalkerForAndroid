@@ -1,7 +1,5 @@
 package action;
 
-import info.FairySelectUser;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,11 +11,6 @@ import org.apache.http.cookie.Cookie;
 import org.apache.http.message.BasicNameValuePair;
 import org.w3c.dom.Document;
 
-import android.content.SharedPreferences.Editor;
-
-import com.example.maw.MainActivity;
-
-import walker.Config;
 import walker.ErrorData;
 import walker.Info;
 import walker.Process;
@@ -53,12 +46,24 @@ public class Login {
 				ErrorData.text = ERR_CHECK_INSPECTION;
 				throw ex;
 			}
+
+			// Thread.sleep(Process.getRandom(1000, 2000));
+
+			if (Info.Debug) {
+				String clazzName = new Object() {
+					public String getClassName() {
+						String clazzName = this.getClass().getName();
+						return clazzName.substring(0,
+								clazzName.lastIndexOf('$'));
+					}
+				}.getClassName();
+				walker.Go.saveXMLFile(result, clazzName);
+			}
+
 		}
 		ArrayList<NameValuePair> al = new ArrayList<NameValuePair>();
-		al.add(new BasicNameValuePair("login_id", MainActivity.config
-				.getString("LoginID", "")));
-		al.add(new BasicNameValuePair("password", MainActivity.config
-				.getString("LoginPW", "")));
+		al.add(new BasicNameValuePair("login_id", Info.LoginId));
+		al.add(new BasicNameValuePair("password", Info.LoginPw));
 		try {
 			result = Process.network.ConnectToServer(URL_LOGIN, al, true);
 		} catch (Exception ex) {
@@ -68,6 +73,19 @@ public class Login {
 			ex.printStackTrace();
 			throw ex;
 		}
+
+		// Thread.sleep(Process.getRandom(1000, 2000));
+
+		if (Info.Debug) {
+			String clazzName = new Object() {
+				public String getClassName() {
+					String clazzName = this.getClass().getName();
+					return clazzName.substring(0, clazzName.lastIndexOf('$'));
+				}
+			}.getClassName();
+			walker.Go.saveXMLFile(result, clazzName);
+		}
+
 		try {
 			doc = Process.ParseXMLBytes(result);
 		} catch (Exception ex) {
@@ -104,15 +122,8 @@ public class Login {
 					// System.out.println("- " + cookies.get(i).getName());
 					if (cookies.get(i).getName().equals("S")) {
 						// System.out.println("- " + cookies.get(i).getValue());
-						Editor editor = MainActivity.config.edit();
-						editor.putString("SessionID", cookies.get(i).getValue());
-						editor.commit();
-						// MainActivity.config.saveSessionId(MainActivity.config.sessionId,
-						// Go.configFile);
-						// MainActivity.config.sqlitecrud.update("config",
-						// MainActivity.config.LoginId,
-						// "username", new String[] { "sessionId" },
-						// new String[] { MainActivity.config.sessionId });
+						Info.sessionId = cookies.get(i).getValue();
+						walker.Go.saveSessionId(Info.sessionId);
 					}
 				}
 			}
@@ -122,18 +133,12 @@ public class Login {
 			}
 
 			if (!xpath.evaluate("//fairy_appearance", doc).equals("0")) {
-				Process.info.events.push(Info.EventType.fairyAppear);
+				Process.AddUrgentTask(Info.EventType.getFairyList);
 			}
 
 			Process.info.userId = xpath.evaluate("//login/user_id", doc);
 			ParseUserDataInfo.parse(doc);
 			ParseCardList.parse(doc);
-
-			Process.info.FairySelectUserList.put(Process.info.userId,
-					new FairySelectUser(Process.info.userId,
-							Process.info.username)); // 添加自己到放妖的用户列表
-
-			Process.info.SetTimeoutByAction(Name);
 
 			Process.info.cardMax = Integer.parseInt(xpath.evaluate(
 					"//your_data/max_card_num", doc));

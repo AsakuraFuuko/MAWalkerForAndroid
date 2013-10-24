@@ -24,7 +24,6 @@ import org.apache.http.impl.cookie.BasicClientCookie;
 import org.apache.http.message.BasicNameValuePair;
 import org.w3c.dom.Document;
 
-import walker.Config;
 import walker.Info;
 import walker.Process;
 import walker.Info.EventType;
@@ -201,10 +200,10 @@ public class MainActivity extends Activity {
 		case R.id.action_clearlog:
 			Text.setText("");
 			break;
-		case R.id.action_partyrank:
-			Process.info.events.add(EventType.partyRank);
-			log("读取团贡事件已加入队列..");
-			break;
+//		case R.id.action_partyrank:
+//			Process.info.events.add(EventType.partyRank);
+//			log("读取团贡事件已加入队列..");
+//			break;
 		case R.id.action_flowcount:
 			FlowCount();
 			break;

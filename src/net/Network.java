@@ -1,4 +1,5 @@
 package net;
+
 import java.io.IOException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
@@ -22,10 +23,7 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.params.HttpParams;
 
-import com.example.maw.MainActivity;
-
-import walker.Config;
-
+import walker.Info;
 
 public class Network {
 	private static final String Auth = "eWa25vrE";
@@ -33,7 +31,8 @@ public class Network {
 
 	private DefaultHttpClient client;
 	public CookieStore cookie;
-	
+	public String UserAgent;
+
 	public Network() {
 		client = new DefaultHttpClient();
 		cookie = client.getCookieStore();
@@ -41,35 +40,46 @@ public class Network {
 		hp.setParameter("http.socket.timeout", 0x7530);
 		hp.setParameter("http.connection.timeout", 0x7530);
 	}
-	
-	private List<NameValuePair> RequestProcess(List<NameValuePair> source, boolean UseDefaultKey) throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException {
+
+	private List<NameValuePair> RequestProcess(List<NameValuePair> source,
+			boolean UseDefaultKey) throws InvalidKeyException,
+			NoSuchAlgorithmException, NoSuchPaddingException,
+			IllegalBlockSizeException, BadPaddingException {
 		ArrayList<NameValuePair> result = new ArrayList<NameValuePair>();
-		Iterator<NameValuePair> i  = source.iterator();
-		while(i.hasNext()) {
+		Iterator<NameValuePair> i = source.iterator();
+		while (i.hasNext()) {
 			NameValuePair n = i.next();
 			if (UseDefaultKey) {
-				result.add(new BasicNameValuePair(n.getName(),Crypto.Encrypt2Base64NoKey(n.getValue())));
+				result.add(new BasicNameValuePair(n.getName(), Crypto
+						.Encrypt2Base64NoKey(n.getValue())));
 			} else {
-				result.add(new BasicNameValuePair(n.getName(),Crypto.Encrypt2Base64WithKey(n.getValue())));
-			}	
+				result.add(new BasicNameValuePair(n.getName(), Crypto
+						.Encrypt2Base64WithKey(n.getValue())));
+			}
 		}
 		return result;
 	}
-	
-	public byte[] ConnectToServer(String url, List<NameValuePair> content, boolean UseDefaultKey) throws InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException, ClientProtocolException, IOException {
-		List<NameValuePair> post = RequestProcess(content,UseDefaultKey);
-		
+
+	public byte[] ConnectToServer(String url, List<NameValuePair> content,
+			boolean UseDefaultKey) throws InvalidKeyException,
+			NoSuchAlgorithmException, NoSuchPaddingException,
+			IllegalBlockSizeException, BadPaddingException,
+			ClientProtocolException, IOException {
+		List<NameValuePair> post = RequestProcess(content, UseDefaultKey);
+
 		HttpPost hp = new HttpPost(url);
-		hp.setHeader("User-Agent", MainActivity.config.getString("UserAgent", ""));
+		hp.setHeader("User-Agent", UserAgent);
 		hp.setHeader("Accept-Encoding", "gzip, deflate");
-		hp.setEntity(new UrlEncodedFormEntity(post,"UTF-8"));
-		
-		AuthScope as = new AuthScope(hp.getURI().getHost(),hp.getURI().getPort());
+		hp.setEntity(new UrlEncodedFormEntity(post, "UTF-8"));
+
+		AuthScope as = new AuthScope(hp.getURI().getHost(), hp.getURI()
+				.getPort());
 		CredentialsProvider cp = client.getCredentialsProvider();
-		UsernamePasswordCredentials upc = new UsernamePasswordCredentials(Auth,Key);
+		UsernamePasswordCredentials upc = new UsernamePasswordCredentials(Auth,
+				Key);
 		cp.setCredentials(as, upc);
-		byte[] b = client.execute(hp,new HttpResponseHandler());
-		
+		byte[] b = client.execute(hp, new HttpResponseHandler());
+
 		/* end */
 		if (b != null) {
 			if (url.contains("gp_verify_receipt?")) {
@@ -89,8 +99,8 @@ public class Network {
 					return Crypto.DecryptWithKey(b);
 				}
 			}
-		} 
+		}
 		return null;
 	}
-	
+
 }

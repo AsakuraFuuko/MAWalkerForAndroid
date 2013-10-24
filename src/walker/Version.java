@@ -1,19 +1,17 @@
 package walker;
 
 public class Version {
-	private static String major = "1";
-	private static String minor = "0";
-	private static String release = "32";
+	private static String month = "10";
+	private static String date = "20";
+	private static String release = "Beta";
 	private static String copyright = "2013©wjsjwr.org";
-	private static String code = "Waive";
-	private static String thanks = "@innocentius, @AsakuraFuuko";
-	
-	public static String strVersion() {
-		return String.format("MAWalker(java) v%s.%s.%s %s, %s", major, minor, release, code, copyright); 
+	private static String code = "Crudity";
+
+	public static String printVersion() {
+		return String.format(
+				"MAWalker(java) version: %s.%s-%s\nCopyright: %s, %s\n", month,
+				date, release, code, copyright)
+				+ "Enhanced version by MengHang⑨.\n"
+				+ "Please use this with new configuration xml file provided.";
 	}
-	
-	public static String strThanks(){
-		return String.format("对下列网友表示感谢（排名不分先后）: %s", thanks);
-	}
-	
 }

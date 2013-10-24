@@ -1,9 +1,14 @@
 package walker;
 
+import info.GuildFairyBattleForce;
+
 import java.io.ByteArrayInputStream;
-import java.nio.charset.Charset;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -12,69 +17,195 @@ import net.Network;
 
 import org.w3c.dom.Document;
 
-import com.example.maw.MainActivity;
-
-import walker.Info.TimeoutEntry;
 import action.ActionRegistry.Action;
 import action.AddArea;
+import action.AutoMedicine;
 import action.CookieLogin;
 import action.Explore;
+import action.FairyDianzan;
+import action.GetCardDeck;
 import action.GetFairyList;
 import action.GetFairyReward;
 import action.GetFloorInfo;
+import action.GetRewards;
 import action.GotoFloor;
+import action.GotoMainMenu;
 import action.GuildBattle;
 import action.GuildTop;
 import action.Login;
 import action.LvUp;
-import action.PFBGood;
-import action.PartyRank;
 import action.PrivateFairyBattle;
-import action.RecvPFBGood;
+import action.RecFairyDianzan;
+import action.RewardBox;
 import action.SellCard;
-import action.Use;
 
 public class Process {
 	public static Info info;
 	public static Network network;
+	public static Timer TaskTimer;
+	public static CardDataBase CardData;
+	private static long lastGuildBattleTime;
 
 	public Process() {
 		info = new Info();
 		network = new Network();
+		TaskTimer = new Timer();
+		CardData = new CardDataBase();
+		lastGuildBattleTime = System.currentTimeMillis();
+	}
+
+	public void run() {
+		if (Info.useSleep) {
+			SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+			Go.log("Sleep schedule: start time: "
+					+ df.format(Info.startTime.getTime()) + ", stop time: "
+					+ df.format(Info.stopTime.getTime()) + ".", true);
+		}
+		while (true) {
+			try {
+				auto();
+			} catch (Exception ex) {
+				Go.log(ex.getMessage(), true);
+				Process.AddUrgentTask(Info.EventType.cookieOutOfDate);
+				Go.log("Restart", true);
+			}
+		}
 	}
 
 	public void auto() throws Exception {
 		try {
-			if (ErrorData.currentErrorType != ErrorData.ErrorType.none) {
+			if (ErrorData.currentErrorType != ErrorData.ErrorType.none)
 				rescue();
-			} else {
+			else {
 				long start = System.currentTimeMillis();
-				execute(Think.doIt(getPossibleAction()));
+				Action ActionToDo = Action.NOTHING;
+				while (true) {
+					ActionToDo = Think.doIt(getPossibleAction());
+					if (ActionToDo != Action.NOTHING)
+						break;
+				}
+				execute(ActionToDo);
 				long delta = System.currentTimeMillis() - start;
-				if (delta < 5000)
-					Thread.sleep(5000 - delta);
-				if (MainActivity.config.getBoolean("night_mode", true)
-						&& info.events.empty() && info.NoFairy)
-					Thread.sleep(600000); // 半夜速度慢点
+				long tmp = getRandom(0, 5000);
+				if (delta < Info.sleep_time * 1000 + tmp)
+					Thread.sleep(Info.sleep_time * 1000 + tmp - delta);
+				if (Info.nightModeSwitch && info.events.empty() && info.NoFairy)
+					Thread.sleep(2 * 60000); // 半夜速度慢点,等待60s
+				if (Info.useSleep)
+					SleepSchedule();
 			}
 		} catch (Exception ex) {
 			throw ex;
 		}
 	}
 
+	private void SleepSchedule() throws Exception {
+		try {
+			long currentTime = Calendar.getInstance().getTimeInMillis();
+			long tmpStartTime = Info.startTime.getTimeInMillis();
+			long tmpStopTime = Info.stopTime.getTimeInMillis();
+			while (true) {
+				currentTime = Calendar.getInstance().getTimeInMillis();
+				if (currentTime > tmpStartTime && currentTime < tmpStopTime) {
+					Go.log("Sleeping~~~", Info.Nolog);
+					long sleepTime = (tmpStopTime - tmpStartTime) / 10;
+					if (sleepTime > tmpStopTime - currentTime)
+						sleepTime = tmpStopTime - currentTime + 5000;
+					Thread.sleep(sleepTime);
+				} else {
+					break;
+				}
+			}
+		} catch (Exception ex) {
+			throw ex;
+		}
+	}
+
+	private void AddTimerTasks() {
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.getFairyList);
+			}
+		}, 0, 5 * 1000);// 5s
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.guildTop);
+			}
+		}, 0, 45 * 1000);// 45s
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.autoExplore);
+			}
+		}, 0, 30 * 1000);// 30s
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.needFloorInfo);
+			}
+		}, 0, 5 * 60 * 1000);// 5min
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.needAPBCInfo);
+			}
+		}, 0, 5 * 60 * 1000);// 5min
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.autoMedicine);
+			}
+		}, 0, 5 * 60 * 1000); // 5min
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddTask(Info.EventType.rewardBox);
+			}
+		}, 0, 10 * 60 * 1000); // 10min
+		Calendar myCal = Calendar.getInstance();
+		if (myCal.get(Calendar.HOUR_OF_DAY) >= 1) {
+			int date = myCal.get(Calendar.DAY_OF_YEAR);
+			myCal.set(Calendar.DAY_OF_YEAR, date + 1);
+		}
+		myCal.set(Calendar.HOUR_OF_DAY, 1);
+		myCal.set(Calendar.MINUTE, 0);
+		myCal.set(Calendar.SECOND, 0);
+		TaskTimer.schedule(new TimerTask() {
+			public void run() {
+				AddUrgentTask(Info.EventType.notLoggedIn);
+			}
+		}, myCal.getTime(), 24 * 60 * 60 * 1000l);// relogin at 1:00
+	}
+
+	public static void AddTask(Info.EventType _Task) {
+		if (!Process.info.events.contains(_Task)) {
+			Process.info.events.add(0, _Task);
+			if (Info.Debug)
+				Go.log(String.format("Add Task: %s", _Task), Info.Debug);
+		}
+	}
+
+	public static boolean AddUrgentTask(Info.EventType _Task) {
+		if (!Process.info.events.contains(_Task)) {
+			Process.info.events.push(_Task);
+			Go.log(String.format("Add Urgent Task: %s", _Task), Info.Debug);
+			return true;
+		} else {
+			Process.info.events.remove(_Task);
+			Process.info.events.push(_Task);
+			Go.log(String.format("Change and Add Urgent Task: %s", _Task),
+					Info.Debug);
+			return false;
+		}
+	}
+
 	private void rescue() {
-		MainActivity.log(ErrorData.currentErrorType.toString());
+		Go.log(ErrorData.currentErrorType.toString(), true);
 		switch (ErrorData.currentDataType) {
 		case bytes:
 			if (ErrorData.bytes != null) {
-				MainActivity.log(new String(ErrorData.bytes, Charset
-						.forName("utf-8")));
+				Go.log(new String(ErrorData.bytes), true);
 			} else {
-				MainActivity.log("Set type to byte, but no message");
+				Go.log("Set type to byte, but no message", true);
 			}
 			break;
 		case text:
-			MainActivity.log(ErrorData.text);
+			Go.log(ErrorData.text, true);
 			break;
 		default:
 			break;
@@ -82,130 +213,70 @@ public class Process {
 		ErrorData.clear();
 	}
 
-	private List<Action> getPossibleAction() throws InterruptedException {
+	private List<Action> getPossibleAction() {
 		ArrayList<Action> result = new ArrayList<Action>();
 		if (info.events.size() != 0) {
 			switch (info.events.pop()) {
-			case cookieLogin:
-				result.add(Action.COOKIELOGIN);
-				break;
-			case notLoggedIn:
-			case cookieOutOfDate:
+			case notLoggedIn:// 未登录
+			case cookieOutOfDate:// cookie失效
 				result.add(Action.LOGIN);
 				break;
-			case fairyTransform:
-				MainActivity.log("Rare Fairy Appear");
-			case privateFairyAppear:
-			case fairyCanBattle:
+			case cookieLogin:// cookie登陆
+				result.add(Action.COOKIELOGIN);
+				break;
+			case fairyDianzan:// 点赞
+				result.add(Action.FAIRY_DIANZAN);
+				break;
+			case fairyCanBattle:// 妖精战
 				result.add(Action.PRIVATE_FAIRY_BATTLE);
 				break;
-			case fairyReward:
-				if (info.ticket > 0) {
-					result.add(Action.GUILD_TOP);
-				}
-				if (info.ticket < Integer.parseInt(MainActivity.config.getString(
-						"keep_guild_battle_tickets", "8"))) {
-					result.add(Action.GET_FAIRY_REWARD);
-					result.add(Action.UPDATE_INFO);
-					result.add(Action.GUILD_TOP);
-				}
+			case fairyReward:// 获取奖励
+				result.add(Action.GET_FAIRY_REWARD);
 				break;
-			case innerMapJump:
-				MainActivity.log("Map Status Changed!");
-			case needFloorInfo:
+			case innerMapJump:// 里图
+				Go.log("Map Status Changed!", true);
+			case needFloorInfo:// 获取秘境信息
 				result.add(Action.GET_FLOOR_INFO);
 				break;
-			case areaComplete:
+			case areaComplete:// 一个图跑完
 				result.add(Action.ADD_AREA);
 				break;
-			case cardFull:
+			case cardFull:// 卡满了
 				result.add(Action.SELL_CARD);
 				break;
-			case fairyAppear:
+			case getFairyList:// 获取妖精战列表
 				result.add(Action.GET_FAIRY_LIST);
 				break;
-			case getFairyReward:
-				break;
-			case guildBattle:
-				result.add(Action.GUILD_BATTLE);
-				break;
-			case guildTopRetry:
-			case guildTop:
-			case ticketFull:
+			case guildTop:// 强敌站界面
 				result.add(Action.GUILD_TOP);
 				break;
-			case needAPBCInfo:
-				result.add(Action.GOTO_FLOOR);
-				break;
-			case levelUp:
-				if (MainActivity.config.getBoolean("auto_add_point", false) == false) {
-					MainActivity.log("自动加点已关闭");
-				} else {
-					result.add(Action.LV_UP);
-				}
-			case fairyBattleEnd:
-			case fairyBattleLose:
-			case fairyBattleWin:
-				break;
-			case PFBGood:
-				result.add(Action.PFB_GOOD);
-				break;
-			case recvPFBGood:
-				result.add(Action.RECV_PFB_GOOD);
+			case needAPBCInfo:// 更新apbc信息
+				result.add(Action.GOTO_MAIN_MENU);
 				break;
 			case gotoFloor:
 				result.add(Action.GOTO_FLOOR);
 				break;
-			case updateInfo:
-				result.add(Action.UPDATE_INFO);
+			case levelUp:// 升级
+				if (!Info.AutoAddp) {
+					Go.log("Auto Adding points is closed.", !Info.Nolog);
+				} else {
+					result.add(Action.LV_UP);
+				}
+			case autoMedicine:
+				result.add(Action.AUTO_MEDICINE);
 				break;
-			case partyRank:
-				result.add(Action.PARTY_RANK);
+			case autoExplore:
+				result.add(Action.EXPLORE);
+			case getCardDeck:
+				result.add(Action.GET_CARD_DECK);
+			case rewardBox:
+				result.add(Action.REWARD_BOX);
+			case getRewards:
+				result.add(Action.GET_REWARDS);
 			}
 			if (!result.isEmpty())
 				return result;
 		}
-		ArrayList<TimeoutEntry> te = info.CheckTimeout();
-		for (TimeoutEntry e : te) {
-			switch (e) {
-			case apbc:
-				Process.info.events.push(Info.EventType.needAPBCInfo);
-				break;
-			case fairy:
-				Process.info.events.push(Info.EventType.fairyAppear);
-				break;
-			case login:
-				Process.info.events.push(Info.EventType.cookieOutOfDate);
-				break;
-			case map:
-				Process.info.events.push(Info.EventType.needFloorInfo);
-				break;
-			case ticket:
-				if (info.ticket > 0)
-					Process.info.events.push(Info.EventType.cardFull);
-				break;
-			case reward:
-			default:
-				break;
-			}
-		}
-		//
-		// if(Process.info.ticket>0) result.add(Action.GUILD_TOP);
-		result.add(Action.EXPLORE);
-		if (MainActivity.config.getBoolean("auto_use_ap", false)
-				|| MainActivity.config.getBoolean("auto_use_bc", false))
-			result.add(Action.USE);
-		// result.add(Action.GOTO_FLOOR);
-		if (!Process.info.OwnFairyBattleKilled) {
-			try {
-				Thread.sleep(Random(20000, 30000)); // 延时20~30秒
-			} catch (InterruptedException e1) {
-				throw e1;
-			}
-			result.add(Action.GET_FAIRY_LIST);
-		}
-		if (MainActivity.config.getBoolean("fairy_battle_first", false))
-			result.add(Action.GET_FAIRY_LIST);
 		return result;
 	}
 
@@ -214,35 +285,31 @@ public class Process {
 		case COOKIELOGIN:
 			try {
 				switch (CookieLogin.run()) {
-				case 1: {
-
-					MainActivity
-							.log(String
-									.format("Cookie Login User: %s, AP: %d/%d, BC: %d/%d, Card: %d/%d, ticket: %d, sessionId: %s",
-											info.username, info.ap, info.apMax,
-											info.bc, info.bcMax, info.cardList
-													.size(), info.cardMax,
-											info.ticket, MainActivity.config
-													.getString("SessionID", "")));
-					info.events.push(Info.EventType.needFloorInfo);
-				}
+				case 1:
+					Go.log(String
+							.format("Cookie Login: User: %s, AP: %d/%d, BC: %d/%d, Card: %d/%d, ticket: %d, sessionId: %s",
+									info.username, info.ap, info.apMax,
+									info.bc, info.bcMax, info.cardList.size(),
+									info.cardMax, info.ticket, Info.sessionId),
+							true);
+					Process.info.events.clear();
+					AddUrgentTask(Info.EventType.getCardDeck);
+					AddUrgentTask(Info.EventType.needFloorInfo);
+					AddTimerTasks();
 					break;
-				case 0: {
-					MainActivity.log(ErrorData.text);
-					MainActivity.log("Cookie登录失败或已失效，使用普通方式登录...");
+				case 0:
+					Go.log(ErrorData.text, Info.Debug);
+					Go.log("Cookie Login Failed, waiting to login with username and password.",
+							true);
 					ErrorData.clear();
-					info.events.push(Info.EventType.notLoggedIn);
-				}
+					AddUrgentTask(Info.EventType.notLoggedIn);
 					break;
-				case 2: {
-					MainActivity.log("外敌战斗结果跳转...");
-					ErrorData.clear();
-					info.events.push(Info.EventType.cookieLogin);
-				}
+				case 2:
+					AddUrgentTask(Info.EventType.cookieLogin);
 					break;
 				}
 			} catch (Exception ex) {
-				info.events.push(Info.EventType.cookieLogin);
+				AddUrgentTask(Info.EventType.cookieOutOfDate);
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none) {
 					throw ex;
 				}
@@ -251,32 +318,27 @@ public class Process {
 		case LOGIN:
 			try {
 				switch (Login.run()) {
-				case 1: {
-					MainActivity
-							.log(String
-									.format("Normal Login User: %s, AP: %d/%d, BC: %d/%d, Card: %d/%d, ticket: %d, sessionId: %s",
-											info.username, info.ap, info.apMax,
-											info.bc, info.bcMax, info.cardList
-													.size(), info.cardMax,
-											info.ticket, MainActivity.config
-													.getString("SessionID", "")));
-
-					info.events.push(Info.EventType.needFloorInfo);
-				}
+				case 1:
+					Go.log(String
+							.format("Normal Login: User: %s, AP: %d/%d, BC: %d/%d, Card: %d/%d, ticket: %d, sessionId: %s",
+									info.username, info.ap, info.apMax,
+									info.bc, info.bcMax, info.cardList.size(),
+									info.cardMax, info.ticket, Info.sessionId),
+							true);
+					Process.info.events.clear();
+					AddUrgentTask(Info.EventType.getCardDeck);
+					AddUrgentTask(Info.EventType.needFloorInfo);
+					AddTimerTasks();
 					break;
-				case 0: {
-					info.events.push(Info.EventType.notLoggedIn);
-				}
+				case 0:
+					AddUrgentTask(Info.EventType.notLoggedIn);
 					break;
-				case 2: {
-					MainActivity.log("外敌战斗结果跳转...");
-					ErrorData.clear();
-					info.events.push(Info.EventType.cookieLogin);
-				}
+				case 2:
+					AddUrgentTask(Info.EventType.cookieLogin);
 					break;
 				}
 			} catch (Exception ex) {
-				info.events.push(Info.EventType.notLoggedIn);
+				AddUrgentTask(Info.EventType.notLoggedIn);
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none) {
 					throw ex;
 				}
@@ -285,20 +347,16 @@ public class Process {
 		case GET_FLOOR_INFO:
 			try {
 				if (GetFloorInfo.run()) {
-					if (Process.info.AllClear)
-						Process.info.front = Process.info.floor.get(1);
-					MainActivity
-							.log(String.format(
-									"Area(%d) Front: %s>%s@c=%d",
-									info.area.size(),
-									info.area.get(Integer
-											.parseInt(info.front.areaId)).areaName,
-									info.front.floorId, info.front.cost));
+					Go.log(String.format(
+							"Area(%d) Front: %s>%s@c=%d",
+							info.area.size(),
+							info.area.get(Integer.parseInt(info.front.areaId)).areaName,
+							info.front.floorId, info.front.cost), true);
 				}
 
 			} catch (Exception ex) {
 				if (ex.getMessage() != null && ex.getMessage().equals("302")) {
-					info.events.push(Info.EventType.innerMapJump);
+					AddUrgentTask(Info.EventType.innerMapJump);
 					ErrorData.clear();
 				} else {
 					if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
@@ -309,18 +367,17 @@ public class Process {
 		case ADD_AREA:
 			try {
 				if (AddArea.run()) {
-					MainActivity
-							.log(String.format(
-									"Area(%d) Front: %s>%s@c=%d",
-									info.area.size(),
-									info.area.get(Integer
-											.parseInt(info.front.areaId)).areaName,
-									info.front.floorId, info.front.cost));
+
+					Go.log(String.format(
+							"Area(%d) Front: %s>%s@c=%d",
+							info.area.size(),
+							info.area.get(Integer.parseInt(info.front.areaId)).areaName,
+							info.front.floorId, info.front.cost), true);
 				}
 
 			} catch (Exception ex) {
 				if (ex.getMessage().equals("302")) {
-					info.events.push(Info.EventType.innerMapJump);
+					AddUrgentTask(Info.EventType.innerMapJump);
 					ErrorData.clear();
 				} else {
 					if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
@@ -332,21 +389,19 @@ public class Process {
 			try {
 				if (GetFairyList.run()) {
 					if (!info.events.empty()
-							&& info.events.peek() == Info.EventType.fairyCanBattle) {
-						MainActivity.log("Other's fairy found!");
+							&& info.events
+									.contains(Info.EventType.fairyCanBattle)) {
+						Go.log(String.format("%d new fairy(s) found!",
+								Process.info.PrivateFairyList.size()),
+								!Info.Nolog);
 					} else {
-						MainActivity.log("No fairy found.");
+						Go.log("No fairy found.", !Info.Nolog);
 					}
-				} else {
-					if (MainActivity.config.getBoolean("fairy_battle_first",
-							false))
-						info.events.push(Info.EventType.fairyAppear);
 				}
-
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.ConnectionError) {
-					info.events.push(Info.EventType.fairyAppear); // 再次检测
-					MainActivity.log("Retry@GetFairyList");
+					AddUrgentTask(Info.EventType.getFairyList); // 再次检测
+					Go.log("Connection error.Retry to get fairy list.", true);
 					ErrorData.clear();
 				} else if (ErrorData.currentErrorType == ErrorData.ErrorType.none) {
 					throw ex;
@@ -354,65 +409,109 @@ public class Process {
 			}
 
 			break;
-		case GOTO_FLOOR:
+		case FAIRY_DIANZAN:
 			try {
-				if (GotoFloor.run()) {
-					MainActivity
-							.log(String
-									.format("Goto: AP: %d/%d, BC: %d/%d, Front:%s>%s",
-											info.ap,
-											info.apMax,
-											info.bc,
-											info.bcMax,
-											info.area.get(Integer
-													.parseInt(info.front.areaId)).areaName,
-											info.front.floorId));
+				if (FairyDianzan.run()) {
 
 				} else {
-
+					Go.log("Something wrong@DIANZAN.", !Info.Nolog);
 				}
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
-
 			}
-
+			break;
+		case GOTO_FLOOR:
+			try {
+				if (GotoFloor.run()) {
+					String my_state = String
+							.format("User Name: %s, AP: %d/%d, BC: %d/%d, Level: %d, Exp to level up: %d, Cards: %d, Gold: %d, Friendship point: %d.\n",
+									info.username, info.ap, info.apMax,
+									info.bc, info.bcMax, info.lv, info.exp,
+									info.cardList.size(), info.gold,
+									info.friendshippoint);
+					my_state += String.format(
+							"Guild Fairy Battle Team: %s. Ticket: %d. ",
+							info.guildteamname, info.ticket);
+					my_state += String
+							.format("Position: %s>%s, Progress: %d%%.\n",
+									info.area.get(Integer
+											.parseInt(info.front.areaId)).areaName,
+									info.front.floorId,
+									info.area.get(Integer
+											.parseInt(info.front.areaId)).exploreProgress);
+					Go.log(my_state, true);
+				} else {
+					Go.log("Something wrong@GOTO_FLOOR.", !Info.Nolog);
+				}
+			} catch (Exception ex) {
+				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
+					throw ex;
+			}
+			break;
+		case GOTO_MAIN_MENU:
+			try {
+				switch (GotoMainMenu.run()) {
+				case 1:
+					AddTask(Info.EventType.gotoFloor);
+					break;
+				case 0:
+					Go.log("Something wrong@GOTO_MAIN_MENU.", !Info.Nolog);
+					break;
+				case 2:
+					AddUrgentTask(Info.EventType.needAPBCInfo);
+					break;
+				}
+			} catch (Exception ex) {
+				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
+					throw ex;
+			}
 			break;
 		case PRIVATE_FAIRY_BATTLE:
 			try {
-				if (PrivateFairyBattle.run()) {
-					String result = "";
-					if (!info.events.empty()) {
-						switch (info.events.peek()) {
-						case fairyBattleEnd:
+				if (RecFairyDianzan.run()) {
+					if (PrivateFairyBattle.run()) {
+						String result = "";
+						switch (PrivateFairyBattle.FairyBattleResult) {
+						case escape:
 							result = "Too Late";
-							info.events.pop();
 							break;
-						case fairyBattleLose:
+						case lose:
 							result = "Lose";
-							info.events.pop();
 							break;
-						case fairyBattleWin:
+						case win:
 							result = "Win";
-							info.events.pop();
 							break;
 						default:
+							result = "Unknown";
 							break;
 						}
+						String str = String
+								.format("Private Fairy Battle, name: %s, Lv: %d, Hp: %d/%d, Finder: %s, bc: %d/%d, ap: %d/%d, ticket: %d, %s",
+										info.pfairy.FairyName,
+										info.pfairy.FairyLevel,
+										info.pfairy.FairyHp,
+										info.pfairy.FairyHpMax,
+										info.FairySelectUserList
+												.get(info.pfairy.UserId).userName,
+										info.bc, info.bcMax, info.ap,
+										info.apMax, info.ticket, result);
+						if (info.gather != -1)
+							str += String.format(", gather=%d", info.gather);
+						str += ".\n";
+						str += String
+								.format("Card Deck Info: %s, Custom Name: %s, Number: %s, BC: %d.\n",
+										info.CurrentDeck.DeckName,
+										info.CurrentDeck.CustomDeckName,
+										info.CurrentDeck.No,
+										info.CurrentDeck.BC);
+						Go.log(str, true);
+					} else {
+						Go.log("Something wrong@PrivateFairyBattle",
+								!Info.Nolog);
 					}
-					String str = String
-							.format("PFB name=%s(%s), Lv: %s, bc: %d/%d, ap: %d/%d, ticket: %d, %s",
-									info.fairy.FairyName,
-									info.FairySelectUserList
-											.get(info.fairy.UserId).userName,
-									info.fairy.FairyLevel, info.bc, info.bcMax,
-									info.ap, info.apMax, info.ticket, result);
-					if (info.gather != -1)
-						str += String.format(", gather=%d", info.gather);
-
-					MainActivity.log(str);
 				} else {
-
+					Go.log("Something wrong@RecFairyDianzan", !Info.Nolog);
 				}
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
@@ -422,61 +521,16 @@ public class Process {
 		case EXPLORE:
 			try {
 				if (Explore.run()) {
-					MainActivity
-							.log(String
-									.format("Explore[%s>%s]: AP: %d, Gold+%s, Exp+%s, Progress:%s, Result: %s.",
-											info.area.get(Integer
-													.parseInt(info.front.areaId)).areaName,
-											info.front.floorId, info.ap,
-											info.ExploreGold, info.ExploreExp,
-											info.ExploreProgress,
-											info.ExploreResult));
+					Go.log(String
+							.format("Explore[%s>%s]: AP: %d, Gold+%s, Exp+%s, Progress:%s, Result: %s.",
+									info.area.get(Integer
+											.parseInt(info.front.areaId)).areaName,
+									info.front.floorId, info.ap,
+									info.ExploreGold, info.ExploreExp,
+									info.ExploreProgress, info.ExploreResult),
+							true);
 				} else {
-
-				}
-
-				Thread.sleep(Random(5000, 10000));
-			} catch (Exception ex) {
-				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
-					throw ex;
-			}
-			break;
-		case GUILD_BATTLE:
-			try {
-				if (GuildBattle.run()) {
-					String result = "";
-					if (!info.events.empty()) {
-						switch (info.events.peek()) {
-						case guildTopRetry:
-							result = "Too Late";
-							break;
-						case fairyBattleLose:
-							result = "Lose";
-							info.events.pop();
-							break;
-						case fairyBattleWin:
-							result = "Win";
-							info.events.pop();
-							break;
-						default:
-							break;
-						}
-					}
-					double ora = (double) Process.info.gfairy.OwnGuildHP
-							/ (double) Process.info.gfairy.GuildTotalHP * 100;
-					double rra = (double) Process.info.gfairy.RivalGuildHP
-							/ (double) Process.info.gfairy.GuildTotalHP * 100;
-					String str = String
-							.format("PFB name=%s, Lv: %s, %.2f%%/%.2f%%, bc: %d/%d, ap: %d/%d, ticket: %d, week:%s, %s",
-									info.gfairy.FairyName,
-									info.gfairy.FairyLevel, ora, rra, info.bc,
-									info.bcMax, info.ap, info.apMax,
-									info.ticket, info.week, result);
-					MainActivity.log(str);
-
-					Thread.sleep(Random(10000, 15000));
-				} else {
-
+					Go.log("Something wrong@Explore", !Info.Nolog);
 				}
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
@@ -485,14 +539,85 @@ public class Process {
 			break;
 		case GUILD_TOP:
 			try {
-				if (GuildTop.run()) {
-
-				} else {
+				switch (GuildTop.run()) {
+				case 2:// 需要打，而且要显示
+					Go.log(String
+							.format("Guild Fairy Info: Max HP: %d, Our Team: %d(%d%%), Rival's Team: %d(%d%%). ",
+									info.gfbforce.total, info.gfbforce.own,
+									info.gfbforce.ownscale,
+									info.gfbforce.rival,
+									info.gfbforce.rivalscale)
+							+ String.format(
+									"Ticket: %d, Score Multiple: %.1f, Defeat Combo: %d.",
+									info.ticket,
+									info.gfbforce.attack_compensation,
+									info.gfbforce.chain_counter), true);
+					Process.info.gfairy.No = Info.PublicFairyBattle.No;
+					Process.info.CurrentDeck = Info.PublicFairyBattle;
+					Long currentGuildBattleTime = System.currentTimeMillis();
+					if (currentGuildBattleTime - lastGuildBattleTime < 10000)
+						Thread.sleep(10000 + lastGuildBattleTime
+								- currentGuildBattleTime);
+					if (GuildBattle.run()) {
+						String result = "";
+						switch (GuildBattle.FairyBattleResult) {
+						case escape:
+							result = "Too Late";
+							break;
+						case lose:
+							result = "Lose";
+							break;
+						case win:
+							result = "Win";
+							break;
+						default:
+							result = "Unknown";
+							break;
+						}
+						String str = String
+								.format("Guild Fairy Battle, name: %s, Lv: %d, bc: %d/%d, ap: %d/%d, ticket: %d, week:%s, %s.\n",
+										info.gfairy.FairyName,
+										info.gfairy.FairyLevel, info.bc,
+										info.bcMax, info.ap, info.apMax,
+										info.ticket, info.week, result)
+								+ String.format(
+										"Card Deck Info: %s, Custom Name: %s, Number: %s, BC: %d.",
+										info.CurrentDeck.DeckName,
+										info.CurrentDeck.CustomDeckName,
+										info.CurrentDeck.No,
+										info.CurrentDeck.BC);
+						Go.log(str, true);
+						if (Process.info.ticket > 0) // 连续出击直至获胜
+							Process.AddUrgentTask(Info.EventType.guildTop);
+						if (Info.FairyBattleFirst)
+							Process.AddUrgentTask(Info.EventType.getFairyList);
+					} else {
+						Go.log("Something wrong@GUILD_BATTLE.", !Info.Nolog);
+					}
+					lastGuildBattleTime = System.currentTimeMillis();
+					break;
+				case 1:// 不能打，但需要显示
+					Go.log(String
+							.format("Guild Fairy Info: Max HP: %d, Our Team: %d(%d%%), Rival's Team: %d(%d%%). ",
+									info.gfbforce.total, info.gfbforce.own,
+									info.gfbforce.ownscale,
+									info.gfbforce.rival,
+									info.gfbforce.rivalscale)
+							+ String.format(
+									"Ticket: %d, Score Multiple: %.1f, Defeat Combo: %d.",
+									info.ticket,
+									info.gfbforce.attack_compensation,
+									info.gfbforce.chain_counter), !Info.Nolog);
+					break;
+				case 3:// 需要重新获取
+					Process.info.gfbforce = new GuildFairyBattleForce();
+					Process.AddUrgentTask(Info.EventType.guildTop);
+					break;
+				case 0:// 什么都不做
 					if (info.NoFairy)
-						MainActivity.log("Night Mode");
+						Go.log("Night Mode.", !Info.Nolog);
+					break;
 				}
-				MainActivity.log(ErrorData.text);
-				ErrorData.clear();
 
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
@@ -502,10 +627,10 @@ public class Process {
 		case GET_FAIRY_REWARD:
 			try {
 				if (GetFairyReward.run()) {
-					MainActivity.log(ErrorData.text);
+					Go.log(ErrorData.text, true);
 					ErrorData.clear();
+					AddUrgentTask(Info.EventType.needAPBCInfo);
 				}
-
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
@@ -514,143 +639,89 @@ public class Process {
 		case LV_UP:
 			try {
 				if (LvUp.run()) {
-					MainActivity.log(String.format(
-							"Level UP! AP:%d BC:%d", Process.info.apMax,
-							Process.info.bcMax));
+					Go.log(String.format("Level UP! AP:%d BC:%d", info.apMax,
+							info.bcMax), true);
 				}
-
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
 			}
 			break;
-
 		case SELL_CARD:
 			try {
 				if (SellCard.run()) {
-					MainActivity.log(ErrorData.text);
+					Go.log(ErrorData.text, true);
 					ErrorData.clear();
 				} else {
-					MainActivity.log("Something wrong");
+					Go.log("Something wrong@SELL_CARD.", !Info.Nolog);
 				}
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
 			}
 			break;
-		case USE:
+		case AUTO_MEDICINE:
 			try {
-				if (Use.run()) {
-					MainActivity.log(ErrorData.text);
+				if (AutoMedicine.run()) {
+					Go.log(ErrorData.text, true);
 					ErrorData.clear();
-					MainActivity
-							.log(String
-									.format("Bottles: FA:%d, HA:%d, HA(T):%d, FB:%d, HB:%d, HB(T):%d",
-											info.fullAp, info.halfAp,
-											info.halfApToday, info.fullBc,
-											info.halfBc, info.halfBcToday));
+					Go.log(String
+							.format("Bottles: FullAp:%d, HalfAp:%d/Today:%d, FullBc:%d, HalfBc:%d/Today:%d",
+									info.fullAp, info.halfAp, info.halfApToday,
+									info.fullBc, info.halfBc, info.halfBcToday),
+							true);
 				} else {
-					MainActivity.log("Sth Wrong @USE");
+					Go.log("Something wrong@MEDICINE.", !Info.Nolog);
 				}
-
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
 			}
 			break;
-		case PFB_GOOD:
+		case GET_CARD_DECK:
 			try {
-				if (PFBGood.run()) {
-					MainActivity.log(ErrorData.text);
-					ErrorData.clear();
+				if (GetCardDeck.run()) {
+					Go.log("Succeed to get card deck info.", true);
 				} else {
-					MainActivity.log("Something wrong");
+					Go.log("Something wrong@GET_CARD_DECK.", !Info.Nolog);
 				}
-
-			} catch (Exception ex) {
-				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
-					throw ex;
-
-			}
-			break;
-		case RECV_PFB_GOOD:
-			try {
-				if (RecvPFBGood.run()) {
-					MainActivity.log(ErrorData.text);
-					ErrorData.clear();
-				} else {
-					MainActivity.log("Something wrong");
-				}
-
 			} catch (Exception ex) {
 				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
 					throw ex;
 			}
 			break;
-		case UPDATE_INFO:
+		case REWARD_BOX:
 			try {
-				switch (CookieLogin.run(true)) {
-				case 1: {
-					MainActivity
-							.log(String
-									.format("Update User Information: %s, AP: %d/%d, BC: %d/%d, ticket: %d",
-											Process.info.username,
-											Process.info.ap,
-											Process.info.apMax,
-											Process.info.bc,
-											Process.info.bcMax,
-											Process.info.ticket));
-
+				if (RewardBox.run()) {
+					Go.log("Succeed to get reward box info.", !Info.Nolog);
+				} else {
+					Go.log("Something wrong@REWARD_BOX.", !Info.Nolog);
 				}
-					break;
-				case 2: {
-					MainActivity.log("外敌战斗结果跳转...请重试一次");
-					ErrorData.clear();
-				}
-					break;
-				default:
-					MainActivity.log("更新出错0.0");
-				}
-			} catch (Exception e) {
-				if (ErrorData.currentErrorType == ErrorData.ErrorType.none) {
-					MainActivity.log("更新出错0.0");
-				}
+			} catch (Exception ex) {
+				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
+					throw ex;
 			}
 			break;
-		case PARTY_RANK:
+		case GET_REWARDS:
 			try {
-				if (PartyRank.run()) {
-					MainActivity.log(ErrorData.text);
+				if (GetRewards.run()) {
+					Go.log(ErrorData.text, true);
 					ErrorData.clear();
 				} else {
-					MainActivity.log("Something wrong");
+					Go.log("Something wrong@GET_REWARDS.", !Info.Nolog);
 				}
-			} catch (Exception e) {
-				if (ErrorData.currentErrorType == ErrorData.ErrorType.none) {
-					throw e;
-				}
+			} catch (Exception ex) {
+				if (ErrorData.currentErrorType == ErrorData.ErrorType.none)
+					throw ex;
 			}
 			break;
 		case NOTHING:
-			Thread.sleep(Random(30000, 45000)); // 无事可做休息30~45秒
+			Go.log("Nothing to do, have a rest.", !Info.Nolog);
 			break;
 		default:
 			break;
 
 		}
-	}
-
-	/**
-	 * 生成指定范围内的随机数
-	 * 
-	 * @param Min
-	 *            最小值
-	 * @param Max
-	 *            最大值
-	 * @return long类型的随机数
-	 */
-	public static long Random(long Min, long Max) {
-		return Math.round(Math.random() * (Max - Min) + Min);
 	}
 
 	public static Document ParseXMLBytes(byte[] in) throws Exception {
@@ -662,9 +733,13 @@ public class Process {
 			bais = new ByteArrayInputStream(in);
 			Document document = builder.parse(bais);
 			return document;
-		} catch (Exception e) {
-			throw e;
+		} catch (Exception ex) {
+			throw ex;
 		}
+	}
+
+	public static long getRandom(long time1, long time2) {
+		return Math.round(time1 + (time2 - time1) * Math.random());
 	}
 
 }
