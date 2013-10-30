@@ -310,14 +310,26 @@ public class Think {
 				if (ap > 1) {
 					Process.info.front = Process.info.floor.get(ap);
 				} else {
-					Process.info.front = Process.info.floor.get(1);
+					if (Process.info.floor.contains(1))
+						Process.info.front = Process.info.floor.get(1);
+					else {
+						Process.info.front = Process.info.floor.get(2);
+					}
 				}
 			}
 			if (MainActivity.config.getBoolean("one_ap_only", false))
-				Process.info.front = Process.info.floor.get(1);
+				if (Process.info.floor.contains(1))
+					Process.info.front = Process.info.floor.get(1);
+				else {
+					Process.info.front = Process.info.floor.get(2);
+				}
 			// 判断是否可以行动
 			if (Process.info.front == null)
-				Process.info.front = Process.info.floor.get(1);
+				if (Process.info.floor.contains(1))
+					Process.info.front = Process.info.floor.get(1);
+				else {
+					Process.info.front = Process.info.floor.get(2);
+				}
 			if (MainActivity.config.getBoolean("allow_bc_insuffient", false)
 					&& Process.info.ap >= Process.info.front.cost)
 				return EXPLORE_URGENT; // 强制跑图

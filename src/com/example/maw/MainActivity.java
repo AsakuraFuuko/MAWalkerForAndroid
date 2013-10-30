@@ -87,8 +87,18 @@ public class MainActivity extends Activity {
 			@Override
 			public void handleMessage(Message msg) {
 				super.handleMessage(msg);
-				Text.append(String.valueOf(msg.obj));
-				scrollToBottom(ScrollView1, Text);
+				switch (msg.arg1) {
+				case 1:
+					Text.append(String.valueOf(msg.obj));
+					scrollToBottom(ScrollView1, Text);
+					break;
+				case 2:
+					Button1.setEnabled(true);
+					Button2.setEnabled(false);
+					m.setEnabled(false);
+					log("已停止...");
+					break;
+				}
 			}
 		};
 
@@ -110,10 +120,7 @@ public class MainActivity extends Activity {
 			public void onClick(View v) {
 				// TODO Auto-generated method stub
 				isStop = true;
-				log("正在停止...");
-				Button1.setEnabled(true);
-				Button2.setEnabled(false);
-				m.setEnabled(false);
+
 			}
 		});
 	}
@@ -130,6 +137,7 @@ public class MainActivity extends Activity {
 	@SuppressLint("SimpleDateFormat")
 	public static void log(String message) {
 		Message message1 = Message.obtain();
+		message1.arg1 = 1;
 		SimpleDateFormat df = new SimpleDateFormat("HH:mm:ss");// 设置日期格式
 		String str = "";
 		if (message == null || message.isEmpty())
@@ -179,6 +187,10 @@ public class MainActivity extends Activity {
 					log("Restart");
 				}
 			}
+			log("正在停止...");
+			Message message1 = Message.obtain();
+			message1.arg1 = 2;
+			mHandler.sendMessage(message1);
 		}
 	}
 

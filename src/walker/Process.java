@@ -286,7 +286,11 @@ public class Process {
 			try {
 				if (GetFloorInfo.run()) {
 					if (Process.info.AllClear)
-						Process.info.front = Process.info.floor.get(1);
+						if (Process.info.floor.contains(1))
+							Process.info.front = Process.info.floor.get(1);
+						else {
+							Process.info.front = Process.info.floor.get(2);
+						}
 					MainActivity
 							.log(String.format(
 									"Area(%d) Front: %s>%s@c=%d",
